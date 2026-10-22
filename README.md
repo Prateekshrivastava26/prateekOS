@@ -6,7 +6,7 @@ Created by **Prateek Shrivastava** as a project for learning operating-system de
 
 [Source code](https://github.com/Prateekshrivastava26/prateekOS) · [Releases](https://github.com/Prateekshrivastava26/prateekOS/releases) · [Report an issue](https://github.com/Prateekshrivastava26/prateekOS/issues)
 
-> PRATEEKOS is an experimental learning OS. The instructions target QEMU on Windows/WSL and Linux. It has its own kernel and does not run Windows installers, Linux applications, Chrome or Android APKs. Direct installation on a physical PC and ARM hosts have not been validated.
+> PRATEEKOS is an experimental learning OS. The instructions cover Windows/WSL, Windows with QEMU, Ubuntu/Linux, and a proposed macOS ISO launch through QEMU. It has its own kernel and does not run Windows installers, Linux applications, Chrome or Android APKs. Direct installation on physical hardware and operation on macOS have not been validated. Apple Silicon instructions emulate an x86-64 guest; this is not a native ARM kernel.
 
 ## Features
 
@@ -28,12 +28,13 @@ Created by **Prateek Shrivastava** as a project for learning operating-system de
 | Component | Requirement |
 | --- | --- |
 | Guest architecture | x86-64 / AMD64 |
-| Recommended host | A Windows or Linux PC with an Intel/AMD 64-bit processor |
+| Host options | Windows/Linux x86-64; macOS with a compatible QEMU installation |
+| Apple M-series Mac | Run the x86-64 ISO with QEMU TCG emulation; project boot remains untested |
 | Host memory | 8 GB recommended when running Windows, WSL and QEMU together |
 | Guest memory | The launcher assigns 2 GiB |
 | Storage | Space for a 5 GB virtual disk, plus build tools and downloads |
 | Emulator | `qemu-system-x86_64` |
-| Build environment | Ubuntu/WSL or a compatible x86-64 Linux system |
+| Build environment | Ubuntu/WSL or a compatible x86-64 Linux system; use a prebuilt ISO on macOS |
 | Internet | Required on the host for downloading source dependencies |
 
 The launcher grows a regular image file to **5,000,000,000 bytes**. This does not add physical RAM or create a Windows disk partition. The amount of host disk space immediately allocated depends on the host filesystem.
@@ -43,7 +44,14 @@ The launcher grows a regular image file to **5,000,000,000 bytes**. This does no
 - **Try a published ISO:** follow [Run a release ISO](#run-a-release-iso). No compiler is needed.
 - **Build the latest source:** follow [Build from source](#build-from-source). This also provides the wallpaper converter and optional Windows connection tools.
 
-GitHub's **Code → Download ZIP** downloads source files, not a ready-to-boot operating system. If no release ISO has been published yet, build from source.
+| Your computer | Follow this guide |
+| --- | --- |
+| Windows 11, build the latest source | [Windows/Ubuntu build instructions](#build-from-source) |
+| Windows, use a downloaded ISO | [Windows PowerShell ISO instructions](#windows-powershell-without-wsl) |
+| Mac with M-series or Intel chip | [macOS ISO instructions](#macos-installation) |
+| Ubuntu/Linux | [Source build](#build-from-source) or [ISO launch](#ubuntulinux-or-ubuntu-inside-wsl) |
+
+GitHub's **Code → Download ZIP** downloads source files, not a ready-to-boot operating system. If no release ISO has been published, build it on Windows/WSL or x86-64 Linux. Mac users can receive that built ISO from another PC until a release is available.
 
 ## Run a release ISO
 
@@ -105,7 +113,100 @@ if (!(Test-Path .\prateekos-disk.img)) {
 
 Here, the RTC uses your Windows local time. The standalone ISO launch does not enable the buttons that open Windows connection settings; those require the source launcher under WSL.
 
+## macOS installation
+
+These instructions are for **trying an existing x86-64 PRATEEKOS ISO in QEMU** on an Apple M-series or Intel Mac. QEMU supports emulation across CPU architectures. This project has not yet been boot-tested on macOS, so report problems with the Mac model, macOS version and QEMU error.
+
+### 1. Install Homebrew
+
+If `brew --version` works in Mac Terminal, continue to the next step. Otherwise follow the official instructions at [brew.sh](https://brew.sh/), including the installer's **Next steps** for adding Homebrew to your shell PATH. Open a new Terminal afterward.
+
+Use a macOS version supported by your Homebrew/QEMU package. Check the official package requirements if installation fails on an older Mac.
+
+### 2. Install QEMU
+
+Run in **Mac Terminal**:
+
+```bash
+brew install qemu
+qemu-system-x86_64 --version
+```
+
+Do not run the Windows WSL commands or Ubuntu `apt` commands on the Mac.
+
+### 3. Get the bootable ISO
+
+Download an `.iso` asset from [PRATEEKOS Releases](https://github.com/Prateekshrivastava26/prateekOS/releases), when one is published, and rename it **`prateekos.iso`**.
+
+If a release ISO is not available, build the project on Windows/WSL using the source instructions below, copy the resulting `template.iso` to the Mac, and rename it `prateekos.iso`. A ZIP of the GitHub source cannot be booted directly.
+
+Save the ISO in your Mac's Downloads folder. In Mac Terminal:
+
+```bash
+mkdir -p "$HOME/prateekos"
+cp "$HOME/Downloads/prateekos.iso" "$HOME/prateekos/prateekos.iso"
+cd "$HOME/prateekos"
+```
+
+### 4. Create a private virtual disk
+
+Create it only if it does not exist:
+
+```bash
+if [ ! -e prateekos-disk.img ]; then
+    qemu-img create -f raw prateekos-disk.img 5000000000
+fi
+```
+
+The image is a 5 GB virtual storage file. Keep it when upgrading the ISO to retain saved files. Do not repeatedly recreate or format a disk you want to preserve.
+
+### 5. Start PRATEEKOS
+
+Run from the same folder:
+
+```bash
+qemu-system-x86_64 -M pc -accel tcg -m 2G \
+  -cdrom prateekos.iso -boot d \
+  -drive file=prateekos-disk.img,format=raw,if=ide,index=0 \
+  -rtc base=localtime,clock=host
+```
+
+On **Apple Silicon**, `qemu-system-x86_64` and `-accel tcg` emulate the Intel/AMD-style guest that this kernel requires. Keep these settings even though the Mac itself is ARM-based; an ARM machine configuration cannot boot this x86-64 kernel. Emulation can be slower than running a matching guest architecture. The command also uses software emulation on Intel Macs.
+
+The guest date/time starts from the Mac's local clock. On a Mac, the Windows Wi-Fi/Bluetooth tools remain unavailable. Other guest features still depend on a successful boot; this is an unverified platform path, not a compatibility guarantee.
+
+### 6. Set up the new guest disk
+
+After the desktop boots, open the PRATEEKOS Terminal icon. For a **new, unformatted disk only**, enter:
+
+```text
+diskformat
+desktop
+```
+
+If reusing an image, check `diskls` first and keep any existing formatted filesystem. Keyboard shortcuts on Mac laptops may require **Fn**, for example Fn+F7 for Calculator. Desktop icons can be used instead.
+
+### 7. Restart later
+
+Close the QEMU window to stop the emulator. Next time, run:
+
+```bash
+cd "$HOME/prateekos"
+qemu-system-x86_64 -M pc -accel tcg -m 2G \
+  -cdrom prateekos.iso -boot d \
+  -drive file=prateekos-disk.img,format=raw,if=ide,index=0 \
+  -rtc base=localtime,clock=host
+```
+
+Reuse the same disk image. On macOS, follow QEMU's menu/title-bar instructions to release captured input if needed; the Option key corresponds to Alt.
+
+### Building directly on an M-series Mac
+
+The source build walkthrough below targets Ubuntu/WSL or x86-64 Linux. Apple Clang's normal macOS output is not the x86-64 ELF output required by this kernel. An M-series source build needs additional cross-compilation setup, which is not covered by the current project build instructions. Use a prebuilt ISO for this macOS walkthrough.
+
 ## Build from source
+
+Use this section on **Windows with Ubuntu/WSL** or an **x86-64 Ubuntu/Linux computer**. Mac users should use the [macOS ISO guide](#macos-installation).
 
 ### 1. Prepare Ubuntu
 
@@ -351,6 +452,10 @@ If you use the default D: disk, back up the image in `D:\prateekos-storage` inst
 | Saved files disappeared | Check that you reopened the same disk image and used the disk commands rather than RAM commands. |
 | No Wallpaper control or Calculator icon | Update the source and run `make clean` followed by your usual launch command. |
 | Custom wallpaper is missing | Confirm `ramfs/wallpaper.bmp` exists, select Custom and rebuild the ISO. |
+| `brew` is not found on macOS | Complete Homebrew's Next steps to add it to PATH, then reopen Terminal. |
+| `apt` or `wsl` is not found on macOS | Use the macOS/Homebrew ISO instructions instead. |
+| Mac ISO cannot be found | Check `ls -lh "$HOME/prateekos/prateekos.iso"`; the source ZIP is not an ISO. |
+| x86-64 hardware acceleration fails on an M-series Mac | Use the documented `-accel tcg` command. |
 | Importer cannot find Pillow | Run `sudo apt install python3-pil` in Ubuntu. |
 | Keyboard characters appear when moving the mouse | Update the keyboard driver; it must reject auxiliary-device bytes. |
 | Mouse stays captured | Press Ctrl+Alt+G. |
@@ -394,7 +499,7 @@ cp template.iso prateekos.iso
 sha256sum prateekos.iso > SHA256SUMS
 ```
 
-On GitHub, open **Releases → Draft a new release**, choose a version tag such as `v0.1`, and attach **`prateekos.iso`** and **`SHA256SUMS`**. Include the version's known limitations in the release notes. A GitHub source upload alone does not publish an ISO.
+On GitHub, open **Releases → Draft a new release**, choose a version tag such as `v0.1`, and attach **`prateekos.iso`** and **`SHA256SUMS`**. Mac users need the actual ISO asset; GitHub's automatic Source code ZIP/TAR assets do not replace it. Include the version's known limitations in the release notes. A GitHub source upload alone does not publish an ISO.
 
 Publish the bootable ISO instead of your personal `.img` disk. Recipients can create a clean disk using the instructions above. Keep generated `.o`, `.elf`, `initramfs.tar`, emulator logs and downloaded dependency folders out of source commits when possible; the build recreates them.
 
@@ -419,6 +524,9 @@ Changed kernel sources have been compiled with the project's freestanding flags.
 See [LICENSE](LICENSE) and the notices in individual dependencies for licensing terms. Preserve the original template's copyright notice and third-party notices when redistributing the source.
 
 ## Useful documentation
+
+- [Homebrew installation](https://docs.brew.sh/Installation)
+- [QEMU supported emulation architectures](https://www.qemu.org/docs/master/about/emulation.html)
 
 - [QEMU downloads](https://www.qemu.org/download/)
 - [QEMU system invocation](https://qemu-project.gitlab.io/qemu/system/invocation.html)
