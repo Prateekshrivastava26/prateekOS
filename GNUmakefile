@@ -9,7 +9,7 @@ QEMUFLAGS := -m 2G
 
 # Internal QEMU flags that should not be changed by the user.
 override QEMU_MACHINE_FLAGS := \
-    -M q35
+    -M pc
 override QEMU_UEFI_FLAGS := \
     -drive if=pflash,unit=0,format=raw,file=edk2-ovmf-bins/ovmf-code-x86_64.fd,readonly=on
 
@@ -47,11 +47,7 @@ all-hdd: $(IMAGE_NAME).hdd
 
 .PHONY: run
 run: $(IMAGE_NAME).iso
-	qemu-system-x86_64 \
-		$(QEMU_MACHINE_FLAGS) \
-		-cdrom $(IMAGE_NAME).iso \
-		-boot d \
-		$(QEMUFLAGS)
+	bash run-prateekos.sh --no-build
 
 .PHONY: run-uefi
 run-uefi: edk2-ovmf-bins $(IMAGE_NAME).iso
@@ -60,6 +56,7 @@ run-uefi: edk2-ovmf-bins $(IMAGE_NAME).iso
 		$(QEMU_UEFI_FLAGS) \
 		-cdrom $(IMAGE_NAME).iso \
 		-boot d \
+		-hda prateekos-disk.img \
 		$(QEMUFLAGS)
 
 .PHONY: run-hdd
@@ -125,10 +122,28 @@ kernel/.deps-obtained:
 kernel: kernel/.deps-obtained
 	$(MAKE) -C kernel
 
-$(IMAGE_NAME).iso: limine-binary/limine kernel
+user/user.o: user/hello.c
+	gcc -c -O2 -ffreestanding -fno-builtin -fno-pic -fno-pie \
+	    -fno-stack-protector -fno-unwind-tables \
+	    -fno-asynchronous-unwind-tables -m64 -mno-red-zone \
+	    -mcmodel=large $< -o $@
+
+user/user.elf: user/user.o user/linker.ld
+	ld -nostdlib -z max-page-size=0x1000 -T user/linker.ld -o $@ user/user.o
+
+ramfs/bin/hello.elf: user/user.elf
+	mkdir -p ramfs/bin
+	cp user/user.elf $@
+
+initramfs.tar: $(shell find ramfs -type f) ramfs/bin/hello.elf
+	tar --format=ustar -cf $@ -C ramfs .
+
+$(IMAGE_NAME).iso: limine-binary/limine kernel user/user.elf initramfs.tar
 	rm -rf iso_root
 	mkdir -p iso_root/boot
 	cp kernel/bin/kernel iso_root/boot/
+	cp user/user.elf iso_root/boot/
+	cp initramfs.tar iso_root/boot/
 	mkdir -p iso_root/boot/limine
 	cp limine.conf limine-binary/limine-bios.sys limine-binary/limine-bios-cd.bin limine-binary/limine-uefi-cd.bin iso_root/boot/limine/
 	mkdir -p iso_root/EFI/BOOT
@@ -157,7 +172,7 @@ $(IMAGE_NAME).hdd: limine-binary/limine kernel
 .PHONY: clean
 clean:
 	$(MAKE) -C kernel clean
-	rm -rf iso_root $(IMAGE_NAME).iso $(IMAGE_NAME).hdd
+	rm -rf iso_root $(IMAGE_NAME).iso $(IMAGE_NAME).hdd initramfs.tar
 
 .PHONY: distclean
 distclean: clean
